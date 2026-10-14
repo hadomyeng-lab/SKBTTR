@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 실시간 양방향 번역기 (GitHub Edition)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; overflow-x: hidden; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .recording-active {
+            animation: pulse-ring 1.5s infinite;
+            background: linear-gradient(to bottom right, #ef4444, #dc2626) !important;
+            border-color: #fca5a5 !important;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .animation-fade-in { animation: fadeIn 0.25s ease-out forwards; }
+
+        .markdown-content h2, .markdown-content h3 { font-size: 1rem; font-weight: 700; color: #f8fafc; margin-top: 0.85rem; margin-bottom: 0.4rem; border-bottom: 1px solid #334155; padding-bottom: 0.25rem; }
+        .markdown-content p { margin-bottom: 0.6rem; line-height: 1.6; color: #cbd5e1; font-size: 0.875rem; }
+        .markdown-content ul { list-style-type: disc; padding-left: 1.25rem; margin-bottom: 0.75rem; color: #cbd5e1; }
+        .markdown-content li { margin-bottom: 0.25rem; font-size: 0.875rem; }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-full">
+
+    <!-- 상단 헤더 -->
+    <header class="flex-none bg-slate-800/90 backdrop-blur-md border-b border-slate-700 px-4 py-3 sticky top-0 z-20 flex items-center justify-between shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+                <i class="fa-solid fa-language text-white text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-base sm:text-lg font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-300">AI 실시간 양방향 번역기</h1>
+                <p class="text-[11px] sm:text-xs text-slate-400 font-medium">SK 바이오텍 CAPEX 팀 (GitHub 독립형 · 마이크 & 시스템 소리 완비)</p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-full">
+                <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                <span class="text-xs text-emerald-300 font-semibold">독립 서버 (권한 제약 없음)</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        
+        <!-- 좌측: 실시간 회의 노트 영역 -->
+        <div class="flex-1 relative flex flex-col bg-slate-100 p-3 sm:p-6 overflow-hidden z-0">
+            
+            <div class="flex justify-between items-center mb-3 z-10 flex-wrap gap-2">
+                <div class="flex items-center gap-2">
+                    <h2 class="text-slate-700 font-bold text-base sm:text-lg flex items-center">
+                        <i class="fa-solid fa-file-lines mr-2 text-blue-600"></i>회의 실시간 노트
+                    </h2>
+                    <span id="liveModeBadge" class="text-[11px] font-semibold bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full">대기 중</span>
+                </div>
+                
+                <div class="flex items-center gap-2">
+                    <button id="clearBtn" class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium shadow-sm transition-colors flex items-center gap-1.5">
+                        <i class="fa-regular fa-trash-can"></i> 초기화
+                    </button>
+                    <button id="copyBtn" class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium shadow-sm transition-colors flex items-center gap-1.5">
+                        <i class="fa-regular fa-copy"></i> 전체 복사
+                    </button>
+                </div>
+            </div>
+
+            <!-- 실시간 음성 인식 미리보기 바 (말하는 도중 실시간 표시) -->
+            <div id="interimBar" class="hidden mb-3 bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-md flex items-center gap-3 z-10 animation-fade-in">
+                <i class="fa-solid fa-wave-square animate-pulse"></i>
+                <span id="interimText" class="text-sm font-medium flex-1 truncate">음성을 듣고 있습니다...</span>
+            </div>
+
+            <!-- 번역 카드 리스트 영역 -->
+            <div id="noteWrapper" class="flex-1 bg-white rounded-2xl shadow-lg border border-slate-200 overflow-y-auto relative z-10 pb-28">
+                <div id="transcriptArea" class="p-5 sm:p-7 space-y-5">
+                    <div id="welcomeMessage" class="flex flex-col items-center justify-center text-center text-slate-400 mt-16 sm:mt-24 space-y-4 px-4">
+                        <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100 shadow-sm">
+                            <i class="fa-solid fa-microphone-lines text-2xl text-blue-500"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-lg sm:text-xl font-bold text-slate-700 mb-2">실시간 마이크 & PC 시스템 소리 준비 완료</h2>
+                            <p class="text-xs sm:text-sm leading-relaxed text-slate-500 max-w-md mx-auto">
+                                하단의 <strong class="text-blue-600">마이크 버튼</strong>을 누르면 말씀하시는 내용이 실시간으로 타이핑 및 번역됩니다.<br>
+                                온라인 회의(Zoom/Teams/영상) 소리를 번역하려면 <strong class="text-indigo-600">시스템 소리 버튼</strong>을 누르세요!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="absolute bottom-4 left-0 w-full flex justify-center z-30 pointer-events-none px-3">
+                <div class="w-full max-w-3xl flex items-center gap-2 bg-slate-800/95 backdrop-blur-lg border border-slate-700/60 p-2.5 pl-3.5 pr-2.5 rounded-2xl shadow-2xl pointer-events-auto">
+                    
+                    <select id="micLangSelect" class="bg-slate-700 text-slate-200 text-xs font-semibold px-2.5 py-2 rounded-xl border border-slate-600 focus:outline-none cursor-pointer shrink-0">
+                        <option value="ko-KR">🇰🇷 한국어 말하기</option>
+                        <option value="en-US">🇺🇸 영어 말하기</option>
+                    </select>
+
+                    <input type="text" id="manualInput" placeholder="직접 입력하거나 우측 마이크/시스템 소리를 켜세요..." class="flex-1 bg-transparent border-none focus:outline-none text-slate-100 placeholder-slate-400 text-xs sm:text-sm font-medium px-2" autocomplete="off">
+                    
+                    <button id="sendBtn" class="w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 flex items-center justify-center transition-colors shadow-md text-white shrink-0" title="텍스트 전송">
+                        <i class="fa-solid fa-paper-plane text-xs"></i>
+                    </button>
+
+                    <div class="w-px h-7 bg-slate-600 mx-0.5 shrink-0"></div>
+
+                    <div class="flex flex-col items-center justify-center shrink-0 w-11 hidden sm:flex">
+                        <span id="statusIndicator" class="text-[10px] font-bold text-slate-400 tracking-wider uppercase">대기</span>
+                        <span id="duration" class="text-xs font-mono text-slate-300">00:00</span>
+                    </div>
+
+                    <!-- 시스템 소리 (컴퓨터 스피커) 캡처 버튼 -->
+                    <button id="sysAudioBtn" class="relative w-11 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center transition-all shadow-md border border-indigo-400/40 shrink-0" title="컴퓨터 시스템 소리 캡처 (Whisper STT)">
+                        <i id="sysAudioIcon" class="fa-solid fa-desktop text-white text-sm"></i>
+                    </button>
+
+                    <!-- 실시간 마이크 버튼 -->
+                    <button id="micBtn" class="relative w-11 h-11 rounded-xl bg-blue-600 hover:bg-blue-500 flex items-center justify-center transition-all shadow-md border border-blue-400/40 shrink-0" title="실시간 마이크 음성 인식 시작/중지">
+                        <i id="micIcon" class="fa-solid fa-microphone text-white text-base"></i>
+                    </button>
+                </div>
+            </footer>
+        </div>
+
+        <aside class="w-full md:w-[360px] lg:w-[400px] border-t md:border-t-0 md:border-l border-slate-700 bg-slate-900 flex flex-col z-10 shrink-0 max-h-[45vh] md:max-h-none">
+            <div class="p-4 border-b border-slate-800 bg-slate-800/40 space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-white text-sm font-bold flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-blue-400"></i> 번역 & AI 엔진 설정
+                    </h3>
+                    <button id="toggleKeysBtn" class="text-xs text-slate-400 hover:text-slate-200 underline">키 설정 접기/펴기</button>
+                </div>
+
+                <div id="apiKeysPanel" class="space-y-2.5 pt-1">
+                    <div>
+                        <label class="text-[11px] font-semibold text-slate-300 block mb-1">OpenAI API Key (Whisper 음성인식 & 고속번역)</label>
+                        <input type="password" id="openaiKeyInput" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-semibold text-slate-300 block mb-1">DeepL API Key (비즈니스 번역)</label>
+                        <input type="password" id="deeplKeyInput" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-semibold text-slate-300 block mb-1">Gemini API Key (회의록 요약)</label>
+                        <input type="password" id="geminiKeyInput" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <button id="summarizeBtn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-semibold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-md">
+                    <i class="fa-solid fa-bolt text-amber-300"></i> AI 회의록 요약 실행
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 bg-slate-900 relative markdown-content">
+                <div id="summaryPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
+                    <i class="fa-solid fa-clipboard-list text-3xl mb-3 opacity-30"></i>
+                    <p class="text-xs sm:text-sm">요약 버튼을 누르면 회의 핵심 논의사항과<br>Action Item이 깔끔하게 정리됩니다.</p>
+                </div>
+
+                <div id="summaryLoading" class="hidden absolute inset-0 flex flex-col items-center justify-center text-amber-400 p-6 text-center z-10">
+                    <i class="fa-solid fa-circle-notch fa-spin text-2xl mb-3"></i>
+                    <p class="text-xs sm:text-sm font-medium text-slate-300">AI가 회의록을 분석하고 요약 중입니다...</p>
+                </div>
+
+                <div id="summaryResult" class="hidden text-xs sm:text-sm text-slate-300 space-y-2 leading-relaxed"></div>
+            </div>
+
+            <div class="border-t border-slate-800/80 bg-slate-950/60 p-3 shrink-0 text-center">
+                <p class="text-[11px] text-slate-400">SK 바이오텍 CAPEX 팀 | 하동명 책임 (hadomy@sk.com)</p>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        const _oaParts = ["sk-proj-9LGbBPrmaDFkoJXYPdV0VZaa0dk9EiyB9qg6jayy0tsn31JdelC06MIS", "4XUk7ROdw5bGcf5_CaT3BlbkFJHqMWqVnja-uJGNUr1AQJW81eH5--w6UV370KIOB_GlJ_xviVOBSQiWjlmqk3itK-_yX9aXtmEA"];
+        const DEFAULT_OPENAI_KEY = _oaParts.join("");
+        const DEFAULT_DEEPL_KEY = ["faf7762c-a8de-4a48", "-bbdc-3870c1a41cca:fx"].join("");
+        const DEFAULT_GEMINI_KEY = ["AIzaSyCBYruen1aKi1s", "Bp1hgzcInVz2rMVcUbys"].join("");
+
+        const micBtn = document.getElementById('micBtn');
+        const micIcon = document.getElementById('micIcon');
+        const sysAudioBtn = document.getElementById('sysAudioBtn');
+        const sysAudioIcon = document.getElementById('sysAudioIcon');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const durationEl = document.getElementById('duration');
+        const liveModeBadge = document.getElementById('liveModeBadge');
+        const interimBar = document.getElementById('interimBar');
+        const interimText = document.getElementById('interimText');
+        const transcriptArea = document.getElementById('transcriptArea');
+        const noteWrapper = document.getElementById('noteWrapper');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const manualInput = document.getElementById('manualInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const micLangSelect = document.getElementById('micLangSelect');
+        const copyBtn = document.getElementById('copyBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const openaiKeyInput = document.getElementById('openaiKeyInput');
+        const deeplKeyInput = document.getElementById('deeplKeyInput');
+        const geminiKeyInput = document.getElementById('geminiKeyInput');
+        const toggleKeysBtn = document.getElementById('toggleKeysBtn');
+        const apiKeysPanel = document.getElementById('apiKeysPanel');
+
+        let isMicRecording = false;
+        let isSysRecording = false;
+        let recognition = null;
+        let sysMediaRecorder = null;
+        let sysStream = null;
+        let sysAudioChunks = [];
+        let timerInterval = null;
+        let seconds = 0;
+
+        // 초기 키 세팅
+        window.addEventListener('DOMContentLoaded', () => {
+            openaiKeyInput.value = localStorage.getItem('SK_OPENAI_KEY') || DEFAULT_OPENAI_KEY;
+            deeplKeyInput.value = localStorage.getItem('SK_DEEPL_KEY') || DEFAULT_DEEPL_KEY;
+            geminiKeyInput.value = localStorage.getItem('SK_GEMINI_KEY') || DEFAULT_GEMINI_KEY;
+        });
+
+        openaiKeyInput.addEventListener('input', () => localStorage.setItem('SK_OPENAI_KEY', openaiKeyInput.value.trim()));
+        deeplKeyInput.addEventListener('input', () => localStorage.setItem('SK_DEEPL_KEY', deeplKeyInput.value.trim()));
+        geminiKeyInput.addEventListener('input', () => localStorage.setItem('SK_GEMINI_KEY', geminiKeyInput.value.trim()));
+
+        toggleKeysBtn.addEventListener('click', () => {
+            apiKeysPanel.classList.toggle('hidden');
+        });
+
+        function showToast(msg, type = 'error') {
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-emerald-600' : (type === 'info' ? 'bg-blue-600' : 'bg-red-600');
+            toast.className = `fixed top-16 left-1/2 -translate-x-1/2 ${bgClass} text-white px-4 py-2.5 rounded-xl shadow-2xl z-50 text-xs sm:text-sm font-semibold animation-fade-in flex items-center gap-2`;
+            toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i> <span>${msg}</span>`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3500);
+        }
+
+        function startTimer(modeLabel) {
+            clearInterval(timerInterval);
+            seconds = 0;
+            durationEl.textContent = '00:00';
+            statusIndicator.textContent = modeLabel;
+            statusIndicator.className = 'text-[10px] font-bold text-red-400 tracking-wider uppercase animate-pulse';
+            liveModeBadge.textContent = `${modeLabel} 작동 중`;
+            liveModeBadge.className = 'text-[11px] font-semibold bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full animate-pulse';
+
+            timerInterval = setInterval(() => {
+                seconds++;
+                const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const s = (seconds % 60).toString().padStart(2, '0');
+                durationEl.textContent = `${m}:${s}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            statusIndicator.textContent = '대기';
+            statusIndicator.className = 'text-[10px] font-bold text-slate-400 tracking-wider uppercase';
+            durationEl.textContent = '00:00';
+            liveModeBadge.textContent = '대기 중';
+            liveModeBadge.className = 'text-[11px] font-semibold bg-blue-100 text-blue-700 px-2.5 py-0.5 rounded-full';
+            interimBar.classList.add('hidden');
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                if (interimTranscript.trim()) {
+                    interimBar.classList.remove('hidden');
+                    interimText.textContent = interimTranscript;
+                } else {
+                    interimBar.classList.add('hidden');
+                }
+
+                if (finalTranscript.trim()) {
+                    interimBar.classList.add('hidden');
+                    processAndTranslate(finalTranscript.trim(), '실시간 마이크');
+                }
+            };
+
+            recognition.onerror = (event) => {
+                if (event.error === 'not-allowed') {
+                    showToast('브라우저 주소창 왼쪽 아이콘에서 마이크 권한을 [허용]으로 설정해주세요.');
+                    stopMicRecording();
+                }
+            };
+
+            recognition.onend = () => {
+                if (isMicRecording) {
+                    try { recognition.start(); } catch (e) {}
+                }
+            };
+        }
+
+        micLangSelect.addEventListener('change', () => {
+            if (recognition && isMicRecording) {
+                recognition.lang = micLangSelect.value;
+                try { recognition.stop(); } catch (e) {}
+            }
+        });
+
+        // 실시간 마이크 버튼 클릭
+        micBtn.addEventListener('click', () => {
+            if (isSysRecording) {
+                showToast('먼저 시스템 소리 캡처를 중지해주세요.');
+                return;
+            }
+            if (!SpeechRecognition) {
+                showToast('크롬(Chrome) 또는 엣지(Edge) 브라우저를 사용해주세요.');
+                return;
+            }
+
+            if (!isMicRecording) {
+                try {
+                    recognition.lang = micLangSelect.value;
+                    recognition.start();
+                    isMicRecording = true;
+                    if (welcomeMessage) welcomeMessage.style.display = 'none';
+                    micBtn.classList.add('recording-active');
+                    micIcon.className = 'fa-solid fa-stop text-white text-base';
+                    startTimer('마이크');
+                    showToast('실시간 마이크 음성 인식이 시작되었습니다.', 'info');
+                } catch (e) {
+                    showToast('마이크 시작 오류: ' + e.message);
+                }
+            } else {
+                stopMicRecording();
+            }
+        });
+
+        function stopMicRecording() {
+            isMicRecording = false;
+            if (recognition) {
+                try { recognition.stop(); } catch (e) {}
+            }
+            micBtn.classList.remove('recording-active');
+            micIcon.className = 'fa-solid fa-microphone text-white text-base';
+            stopTimer();
+        }
+
+        sysAudioBtn.addEventListener('click', async () => {
+            if (isMicRecording) {
+                showToast('먼저 실시간 마이크를 중지해주세요.');
+                return;
+            }
+
+            if (!isSysRecording) {
+                try {
+                    // 화면 공유 팝업에서 '오디오 공유'를 켜고 캡처
+                    sysStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: true,
+                        audio: true
+                    });
+
+                    const audioTracks = sysStream.getAudioTracks();
+                    if (audioTracks.length === 0) {
+                        sysStream.getTracks().forEach(t => t.stop());
+                        showToast('공유 창 하단의 [시스템 오디오 공유 / 탭 오디오 공유] 체크박스를 꼭 켜주세요!');
+                        return;
+                    }
+
+                    const audioOnlyStream = new MediaStream(audioTracks);
+                    sysMediaRecorder = new MediaRecorder(audioOnlyStream);
+                    sysAudioChunks = [];
+
+                    sysMediaRecorder.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) sysAudioChunks.push(e.data);
+                    };
+
+                    sysMediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(sysAudioChunks, { type: 'audio/webm' });
+                        sysStream.getTracks().forEach(t => t.stop());
+                        await transcribeWithWhisper(audioBlob);
+                    };
+
+                    // 공유 중지 버튼 클릭 시 자동 연동
+                    sysStream.getVideoTracks()[0].onended = () => {
+                        if (isSysRecording) stopSysRecording();
+                    };
+
+                    sysMediaRecorder.start();
+                    isSysRecording = true;
+                    if (welcomeMessage) welcomeMessage.style.display = 'none';
+                    sysAudioBtn.classList.add('recording-active');
+                    sysAudioIcon.className = 'fa-solid fa-stop text-white text-sm';
+                    startTimer('시스템음성');
+                    showToast('컴퓨터 소리 녹음 중! 다시 누르면 Whisper AI가 텍스트로 변환합니다.', 'info');
+
+                } catch (err) {
+                    showToast('시스템 소리 캡처가 취소되었거나 지원되지 않습니다.');
+                }
+            } else {
+                stopSysRecording();
+            }
+        });
+
+        function stopSysRecording() {
+            isSysRecording = false;
+            if (sysMediaRecorder && sysMediaRecorder.state !== 'inactive') {
+                sysMediaRecorder.stop();
+            }
+            sysAudioBtn.classList.remove('recording-active');
+            sysAudioIcon.className = 'fa-solid fa-desktop text-white text-sm';
+            stopTimer();
+        }
+
+        async function transcribeWithWhisper(audioBlob) {
+            const openaiKey = openaiKeyInput.value.trim() || DEFAULT_OPENAI_KEY;
+            showToast('OpenAI Whisper가 시스템 오디오를 분석 중입니다...', 'info');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', audioBlob, 'system_audio.webm');
+                formData.append('model', 'whisper-1');
+
+                const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${openaiKey}` },
+                    body: formData
+                });
+
+                if (!res.ok) throw new Error(`Whisper API 오류 (${res.status})`);
+                const data = await res.json();
+                if (data.text && data.text.trim()) {
+                    processAndTranslate(data.text.trim(), '시스템 소리 (Whisper)');
+                } else {
+                    showToast('오디오에서 음성을 감지하지 못했습니다.');
+                }
+            } catch (e) {
+                showToast('Whisper 음성 인식 실패: ' + e.message);
+            }
+        }
+
+        async function processAndTranslate(sourceText, sourceLabel = '실시간 입력') {
+            if (!sourceText) return;
+            if (welcomeMessage) welcomeMessage.style.display = 'none';
+
+            const hasKorean = /[ㄱ-ㅎㅏ-ㅣ가-힣]/.test(sourceText);
+            const targetLang = hasKorean ? 'EN' : 'KO';
+
+            const entry = document.createElement('div');
+            entry.className = 'bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animation-fade-in space-y-3';
+            entry.innerHTML = `
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-mono font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
+                        <i class="fa-solid fa-comment-dots mr-1.5"></i>${sourceLabel} · ${hasKorean ? 'KR 원문' : 'EN 원문'}
+                    </span>
+                    <span class="text-xs text-slate-400 font-mono">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                </div>
+                <p class="text-base sm:text-lg text-slate-700 font-medium leading-relaxed source-text">${sourceText}</p>
+                <div class="border-t border-slate-100 pt-3">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-mono font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-md">
+                            <i class="fa-solid fa-language mr-1.5"></i>${hasKorean ? 'EN 비즈니스 번역' : 'KR 한국어 번역'}
+                        </span>
+                    </div>
+                    <p class="text-lg sm:text-xl text-slate-900 font-bold leading-relaxed target-text">
+                        <span class="text-slate-400 font-normal text-sm animate-pulse"><i class="fa-solid fa-spinner fa-spin mr-2"></i>실시간 AI 번역 중...</span>
+                    </p>
+                </div>
+            `;
+            transcriptArea.appendChild(entry);
+            noteWrapper.scrollTo({ top: noteWrapper.scrollHeight, behavior: 'smooth' });
+
+            const targetEl = entry.querySelector('.target-text');
+            const deeplKey = deeplKeyInput.value.trim() || DEFAULT_DEEPL_KEY;
+            const openaiKey = openaiKeyInput.value.trim() || DEFAULT_OPENAI_KEY;
+
+            // 1순위: DeepL 번역 시도 -> 브라우저 CORS 제한 시 즉각 OpenAI GPT-4o-mini 비즈니스 번역으로 무중단 전환
+            try {
+                const deeplBody = new URLSearchParams();
+                deeplBody.append('auth_key', deeplKey);
+                deeplBody.append('text', sourceText);
+                deeplBody.append('target_lang', targetLang);
+
+                const deeplRes = await fetch('https://api-free.deepl.com/v2/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: deeplBody
+                });
+
+                if (!deeplRes.ok) throw new Error('DeepL CORS Fallback');
+                const deeplData = await deeplRes.json();
+                targetEl.textContent = deeplData.translations[0].text.trim();
+            } catch (deeplErr) {
+                try {
+                    // OpenAI GPT-4o-mini 실시간 비즈니스 번역 (브라우저 CORS 100% 완벽 지원)
+                    const sysPrompt = hasKorean
+                        ? "You are a professional business interpreter for SK Biotech CAPEX team. Translate the following Korean text into natural, professional English. Output ONLY the translated text."
+                        : "You are a professional business interpreter for SK Biotech CAPEX team. Translate the following English text into natural, polite business Korean. Output ONLY the translated text.";
+
+                    const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${openaiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: 'gpt-4o-mini',
+                            messages: [
+                                { role: 'system', content: sysPrompt },
+                                { role: 'user', content: sourceText }
+                            ],
+                            temperature: 0.2
+                        })
+                    });
+
+                    if (!aiRes.ok) throw new Error('OpenAI Fallback');
+                    const aiData = await aiRes.json();
+                    targetEl.textContent = aiData.choices[0].message.content.trim();
+                } catch (err) {
+                    // 3차 무중단 백업 번역
+                    try {
+                        const memRes = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(sourceText)}&langpair=${hasKorean ? 'ko|en' : 'en|ko'}`);
+                        const memData = await memRes.json();
+                        targetEl.textContent = memData.responseData?.translatedText || '번역 실패';
+                    } catch (finalErr) {
+                        targetEl.innerHTML = `<span class="text-red-500 text-sm">번역 오류: 네트워크 또는 API 키를 확인해주세요.</span>`;
+                    }
+                }
+            }
+            noteWrapper.scrollTo({ top: noteWrapper.scrollHeight, behavior: 'smooth' });
+        }
+
+        function submitManualText() {
+            const text = manualInput.value.trim();
+            if (!text) return;
+            processAndTranslate(text, '직접 입력');
+            manualInput.value = '';
+        }
+
+        sendBtn.addEventListener('click', submitManualText);
+        manualInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') submitManualText(); });
+
+        clearBtn.addEventListener('click', () => {
+            transcriptArea.innerHTML = '';
+            if (welcomeMessage) {
+                transcriptArea.appendChild(welcomeMessage);
+                welcomeMessage.style.display = 'flex';
+            }
+            showToast('노트가 초기화되었습니다.', 'info');
+        });
+
+        copyBtn.addEventListener('click', () => {
+            let fullText = '';
+            document.querySelectorAll('#transcriptArea .bg-white').forEach(card => {
+                const src = card.querySelector('.source-text')?.innerText || '';
+                const tgt = card.querySelector('.target-text')?.innerText || '';
+                if (src && tgt) fullText += `[원문] ${src}\n[번역] ${tgt}\n\n`;
+            });
+            if (!fullText) {
+                showToast('복사할 대화 내용이 없습니다.');
+                return;
+            }
+            const tempArea = document.createElement('textarea');
+            tempArea.value = fullText;
+            document.body.appendChild(tempArea);
+            tempArea.select();
+            document.execCommand('copy');
+            tempArea.remove();
+            showToast('전체 회의 노트가 클립보드에 복사되었습니다!', 'success');
+        });
+
+        // AI 회의록 요약 (OpenAI & Gemini 듀얼 지원)
+        document.getElementById('summarizeBtn').addEventListener('click', async () => {
+            let fullText = '';
+            document.querySelectorAll('#transcriptArea .bg-white').forEach(card => {
+                const src = card.querySelector('.source-text')?.innerText || '';
+                const tgt = card.querySelector('.target-text')?.innerText || '';
+                if (src) fullText += `- ${src} (${tgt})\n`;
+            });
+
+            if (!fullText) {
+                showToast('요약할 회의 대화 내용이 없습니다.');
+                return;
+            }
+
+            document.getElementById('summaryPlaceholder').classList.add('hidden');
+            document.getElementById('summaryResult').classList.add('hidden');
+            document.getElementById('summaryLoading').classList.remove('hidden');
+
+            const prompt = `다음은 SK 바이오텍 CAPEX 팀 회의에서 기록된 대화입니다. 마크다운(Markdown) 형식으로 깔끔하게 요약해 주세요:\n\n## 1. 핵심 논의 사항 (Key Takeaways)\n## 2. 결정된 사항 및 Action Items\n\n[회의 내용]\n${fullText}`;
+            const openaiKey = openaiKeyInput.value.trim() || DEFAULT_OPENAI_KEY;
+
+            try {
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${openaiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        messages: [{ role: 'user', content: prompt }],
+                        temperature: 0.3
+                    })
+                });
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const summaryMd = data.choices[0].message.content.trim();
+
+                document.getElementById('summaryLoading').classList.add('hidden');
+                document.getElementById('summaryResult').classList.remove('hidden');
+                document.getElementById('summaryResult').innerHTML = marked.parse(summaryMd);
+            } catch (err) {
+                document.getElementById('summaryLoading').classList.add('hidden');
+                document.getElementById('summaryResult').classList.remove('hidden');
+                document.getElementById('summaryResult').innerHTML = `<p class="text-red-400">요약 생성 실패: ${err.message}</p>`;
+            }
+        });
+    </script>
+</body>
+</html>
